@@ -1,0 +1,68 @@
+# =============================================================================
+# Imagen de la API (Laravel).
+#
+# Versiones fijadas:
+#   - base  : debian bookworm (estable, soporte largo)
+#   - PHP   : 8.3
+#   - Composer : 2.7
+#
+# Ver docs/10-PRUEBAS-Y-ESTADO.md: esta imagen NO se construyó. En el entorno
+# donde se escribió el sistema no había Docker.
+# =============================================================================
+
+FROM php:8.3-fpm-bookworm AS base
+
+# Extensiones que Laravel 12 y PostgreSQL necesitan. `pdo_pgsql` es la que
+# permite hablar con la base; sin ella, la aplicación no arranca.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git \
+        unzip \
+        libpq-dev \
+        libzip-dev \
+        libicu-dev \
+        libonig-dev \
+        supervisor \
+    && docker-php-ext-install -y \
+        pdo_pgsql \
+        pgsql \
+        zip \
+        intl \
+        bcmath \
+        opcache \
+    && apt-get purge -y --auto-remove \
+    && rm -rf /var/lib/apt/lists/*
+
+# Composer, versión fijada.
+COPY --from=composer:2.7.9 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /var/www/html
+
+# Primero solo los manifiestos, para que la capa de dependencias se reutilice
+# mientras no cambien las versiones declaradas.
+COPY api/composer.json api/composer.lock* ./
+RUN composer install \
+        --no-dev \
+        --no-scripts \
+        --no-autoloader \
+        --prefer-dist \
+        --no-interaction
+
+# Después el código.
+COPY api/ ./
+
+RUN composer dump-autoload --optimize --no-dev \
+    && mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache
+
+# El contexto de construcción es la raíz de la aplicación (ver
+# `build.context` en el compose), así que las rutas son relativas a ella.
+COPY deploy/php.ini /usr/local/etc/php/conf.d/zz-app.ini
+COPY deploy/opcache.ini /usr/local/etc/php/conf.d/zz-opcache.ini
+
+COPY --chmod=755 deploy/entrypoint.api.sh /usr/local/bin/entrypoint
+ENTRYPOINT ["/usr/local/bin/entrypoint"]
+
+EXPOSE 8000
+
+CMD ["php-fpm"]

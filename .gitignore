@@ -1,0 +1,33 @@
+# Dependencias
+/vendor/
+/node_modules/
+
+# Entorno: NUNCA se sube. Contiene claves de base de datos, contraseñas de
+# correo y el secreto del cliente de Authentik.
+/.env
+/.env.local
+/api/.env
+
+# Laravel
+/api/storage/*.key
+/api/storage/framework/cache/*
+/api/storage/framework/sessions/*
+/api/storage/framework/views/*
+/api/storage/logs/*
+/api/bootstrap/cache/*
+!/api/storage/framework/.gitignore
+
+# Nuxt
+/web/.nuxt/
+/web/.output/
+/web/dist/
+/web/.data/
+
+# Pruebas
+/api/.phpunit.cache/
+/api/vendor/
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.log

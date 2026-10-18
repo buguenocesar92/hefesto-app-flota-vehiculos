@@ -1,0 +1,40 @@
+# =============================================================================
+# Imagen del frontend (Nuxt con SSR).
+#
+# Versiones fijadas:
+#   - Node 20.11 (LTS)
+#   - Nuxt 3.13.2 (fijada en web/package.json, sin ^ ni ~)
+#
+# Dos etapas: la de construcción instala TODAS las dependencias; la final solo
+# lleva las de producción. Una imagen de runtime con las dependencias de
+# desarrollo incluida es una imagen con más superficie de la necesaria.
+#
+# Ver docs/10-PRUEBAS-Y-ESTADO.md: esta imagen NO se construyó.
+# =============================================================================
+
+FROM node:20.11-bookworm-slim AS construccion
+
+WORKDIR /app
+
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+
+COPY web/ ./
+RUN npm run build
+
+
+FROM node:20.11-bookworm-slim AS final
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NITRO_HOST=0.0.0.0
+ENV NITRO_PORT=3000
+
+COPY --from=construccion /app/.output ./.output
+
+USER node
+
+EXPOSE 3000
+
+CMD ["node", ".output/server/index.mjs"]

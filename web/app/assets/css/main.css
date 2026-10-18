@@ -1,0 +1,78 @@
+:root {
+    --fondo: #f6f7f9;
+    --fondo-tarjeta: #ffffff;
+    --fondo-alerta: #fdecec;
+    --borde: #e2e5e9;
+    --texto: #1c2024;
+    --texto-suave: #5c6670;
+    --ok: #1b7f4b;
+    --aviso: #9a6400;
+    --alerta: #b32020;
+    --texto-alerta: #8a1a1a;
+    --info: #1c5d99;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--fondo);
+    color: var(--texto);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+        sans-serif;
+    line-height: 1.5;
+}
+
+/*
+ * Colores de estado.
+ *
+ * El rojo y el ámbar están escolhidos para distinguirse también en pantallas
+ * al Sol, que es donde se mira esto: un operador revisando un vehículo en un
+ * estacionamiento no siempre tiene el brillo de un escritorio.
+ *
+ * El color nunca es el único indicador. Cada etiqueta lleva su texto, porque
+ * un sistema de avisos que depende de que el operador distinga un tono de rojo
+ * de uno de ámbar ya es un sistema que depende de la vista de otra persona.
+ */
+.etiqueta {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    border: 1px solid currentColor;
+}
+
+.estado--ok {
+    color: var(--ok);
+}
+
+.estado--info {
+    color: var(--info);
+}
+
+.estado--aviso {
+    color: var(--aviso);
+}
+
+.estado--alerta {
+    color: var(--alerta);
+}
+
+.estado--neutro {
+    color: var(--texto-suave);
+}
+
+.etiqueta--alerta {
+    color: var(--alerta);
+    background: var(--fondo-alerta);
+}
+
+.etiqueta--aviso {
+    color: var(--aviso);
+}
+
+.etiqueta--neutro {
+    color: var(--texto-suave);
+}

@@ -1,0 +1,211 @@
+# =============================================================================
+# Gestión de Flota de Vehículos · Hefesto Studio
+# Compose de DESARROLLO.
+#
+# NOTA HONESTA: estos archivos están escritos y son los que se seguirían, pero
+# NO se han ejecutado. En el entorno donde se construyó el sistema no había
+# Docker. Ver docs/10-PRUEBAS-Y-ESTADO.md.
+#
+# Versiones fijadas, sin `latest` ni rangos.
+#
+# ADVERTENCIA CRÍTICA SOBRE EL ROL DE POSTGRESQL
+# -----------------------------------------------
+# `flota_app` es el rol que usa la aplicación y NO puede ser superusuario ni
+# tener BYPASSRLS. Si lo es, PostgreSQL ignora todas las políticas de Row Level
+# Security: el sistema seguiría "funcionando" y una flota vería los datos de
+# otra sin ningún error visible. Esa es exactamente la forma en que un fallo de
+# aislamiento pasa desapercibido.
+#
+# `flota:verificar-aislamiento` lo comprueba y falla si lo encuentra.
+# =============================================================================
+
+name: flota-vehiculos
+
+services:
+    postgres:
+        # Versión fijada. 16 es la versión con soporte largo de PostgreSQL.
+        image: postgres:16.4-alpine
+        restart: unless-stopped
+        environment:
+            POSTGRES_DB: ${DB_DATABASE:-flota}
+            POSTGRES_USER: ${DB_MIGRATION_USERNAME:-flota_migrator}
+            POSTGRES_PASSWORD: ${DB_MIGRATION_PASSWORD:?definir DB_MIGRATION_PASSWORD en .env}
+            # Locale y ordenación en español, que es como el operador espera ver
+            # ordenados los apellidos y los nombres de las flotas.
+            POSTGRES_INITDB_ARGS: '--locale-provider=icu --icu-locale=es-CL'
+        ports:
+            - '127.0.0.1:5432:5432'
+        volumes:
+            - postgres_datos:/var/lib/postgresql/data
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U ${DB_MIGRATION_USERNAME:-flota_migrator} -d ${DB_DATABASE:-flota}']
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    redis:
+        image: redis:7.2.5-alpine
+        restart: unless-stopped
+        # Contraseña obligatoria también en desarrollo: Redis sostiene el
+        # candado de la tarea programada de alertas.
+        command: >
+            redis-server
+            --requirepass ${REDIS_PASSWORD:?definir REDIS_PASSWORD en .env}
+            --appendonly yes
+        ports:
+            - '127.0.0.1:6379:6379'
+        volumes:
+            - redis_datos:/data
+        healthcheck:
+            test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG']
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    api:
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile.api
+        restart: unless-stopped
+        environment:
+            APP_ENV: ${APP_ENV:-local}
+            APP_DEBUG: ${APP_DEBUG:-true}
+            APP_KEY: ${APP_KEY:?generar APP_KEY antes de levantar}
+            APP_URL: ${APP_URL:-http://localhost:8000}
+            APP_TIMEZONE: ${APP_TIMEZONE:-America/Santiago}
+            APP_LOCALE: ${APP_LOCALE:-es_CL}
+
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: ${DB_DATABASE:-flota}
+            DB_USERNAME: ${DB_USERNAME:-flota_app}
+            DB_PASSWORD: ${DB_PASSWORD:?definir DB_PASSWORD en .env}
+
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: ${REDIS_PASSWORD}
+            CACHE_STORE: redis
+            QUEUE_CONNECTION: redis
+            SESSION_DRIVER: redis
+
+            AUTHENTIK_URL: ${AUTHENTIK_URL:-}
+            AUTHENTIK_CLIENT_ID: ${AUTHENTIK_CLIENT_ID:-}
+            AUTHENTIK_CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET:-}
+            FLOTA_ZONA_HORARIA: ${FLOTA_ZONA_HORARIA:-America/Santiago}
+            FLOTA_PROGRAMACION_ALERTAS: ${FLOTA_PROGRAMACION_ALERTAS:-0 10 * * *}
+            FLOTA_CANDADO_ALERTAS_MINUTOS: ${FLOTA_CANDADO_ALERTAS_MINUTOS:-30}
+            FLOTA_ALERTAS_ENVIO_ACTIVO: ${FLOTA_ALERTAS_ENVIO_ACTIVO:-false}
+
+            MAIL_MAILER: ${MAIL_MAILER:-log}
+            MAIL_HOST: ${MAIL_HOST:-}
+            MAIL_PORT: ${MAIL_PORT:-587}
+            MAIL_USERNAME: ${MAIL_USERNAME:-}
+            MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+            MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+            MAIL_FROM_NAME: ${MAIL_FROM_NAME:-}
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        ports:
+            - '127.0.0.1:8000:8000'
+
+    scheduler:
+        # Contenedor separado que SOLO corre el planificador de tareas.
+        #
+        # Por qué no dejar el planificador dentro de `api`: si se despliegan
+        # dos réplicas de la API, cada una correría sus tareas. Con
+        # `onOneServer()` y un candado en Redis se evita la mayoría de los
+        # duplicados, pero separar el proceso hace el problema estructural
+        # visible de inmediato.
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile.api
+        restart: unless-stopped
+        command: ['php', 'artisan', 'schedule:work']
+        environment:
+            APP_ENV: ${APP_ENV:-local}
+            APP_KEY: ${APP_KEY:?}
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: ${DB_DATABASE:-flota}
+            DB_USERNAME: ${DB_USERNAME:-flota_app}
+            DB_PASSWORD: ${DB_PASSWORD:?}
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+            CACHE_STORE: redis
+            QUEUE_CONNECTION: redis
+            FLOTA_PROGRAMACION_ALERTAS: ${FLOTA_PROGRAMACION_ALERTAS:-0 10 * * *}
+            FLOTA_CANDADO_ALERTAS_MINUTOS: ${FLOTA_CANDADO_ALERTAS_MINUTOS:-30}
+            FLOTA_ALERTAS_ENVIO_ACTIVO: ${FLOTA_ALERTAS_ENVIO_ACTIVO:-false}
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+
+    worker:
+        # Worker de la cola de alertas. Envía los avisos que el planificador
+        # ya generó.
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile.api
+        restart: unless-stopped
+        command: ['php', 'artisan', 'queue:work', '--tries=3', '--backoff=60', '--verbose']
+        environment:
+            APP_ENV: ${APP_ENV:-local}
+            APP_KEY: ${APP_KEY:?}
+            DB_CONNECTION: pgsql
+            DB_HOST: postgres
+            DB_PORT: 5432
+            DB_DATABASE: ${DB_DATABASE:-flota}
+            DB_USERNAME: ${DB_USERNAME:-flota_app}
+            DB_PASSWORD: ${DB_PASSWORD:?}
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+            QUEUE_CONNECTION: redis
+            CACHE_STORE: redis
+            FLOTA_ALERTAS_ENVIO_ACTIVO: ${FLOTA_ALERTAS_ENVIO_ACTIVO:-false}
+            MAIL_MAILER: ${MAIL_MAILER:-log}
+            MAIL_HOST: ${MAIL_HOST:-}
+            MAIL_PORT: ${MAIL_PORT:-587}
+            MAIL_USERNAME: ${MAIL_USERNAME:-}
+            MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+            MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS:-}
+        depends_on:
+            redis:
+                condition: service_healthy
+
+    web:
+        build:
+            context: ..
+            dockerfile: deploy/Dockerfile.web
+        restart: unless-stopped
+        environment:
+            NUXT_API_BASE: ${FLOTA_API_BASE:-http://api:8000}
+            NUXT_PUBLIC_AUTHENTIK_URL: ${NUXT_PUBLIC_AUTHENTIK_URL:-}
+            NUXT_PUBLIC_AUTHENTIK_CLIENT_ID: ${NUXT_PUBLIC_AUTHENTIK_CLIENT_ID:-}
+        depends_on:
+            - api
+        ports:
+            - '3000:3000'
+
+    # Authentik queda FUERA del compose a propósito.
+    #
+    # Es un servicio de identidad con su propia base de datos y su propio ciclo
+    # de vida, y suele ser compartido entre varias aplicaciones de Hefesto.
+    # Instalar Authentik una vez y apuntar esta aplicación a él es más sensato
+    # que levantar una identidad distinta por cada sistema. Ver docs/04.
+    #
+    # authentik:
+    #     image: authentik:2024.6.4
+    #     ...
+
+volumes:
+    postgres_datos:
+    redis_datos:

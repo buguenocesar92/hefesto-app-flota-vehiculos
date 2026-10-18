@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Suites de pruebas:
+
+    * "Unidad"        : logica pura, sin base de datos (plazos, kilometraje,
+                       rendimiento).
+    * "Caracteristicas": API completa sobre el motor configurado.
+    * "Aislamiento"   : la prueba de que una flota NO puede leer datos de otra.
+    * "Alertas"       : la prueba de que una alerta de vencimiento se genera
+                       UNA sola vez por documento y periodo, aunque la tarea
+                       programada se reejecute.
+
+    IMPORTANTE Y HONESTO: el motor por defecto de estas pruebas es SQLite en
+    memoria, para que la suite corra en cualquier maquina. Las politicas de
+    Row Level Security de PostgreSQL NO existen en SQLite, y la unicidad de
+    `alertas_documento` se crea con un indice unico que SQLite tambien respeta,
+    pero el comportamiento exacto de `ON CONFLICT DO NOTHING` no es identico.
+
+    Por eso las pruebas que dependen de PostgreSQL de verdad se saltan solas
+    cuando el motor no es PostgreSQL (ver `Tests\TestCase::requierePostgres()`).
+    Nunca se declaran probadas si no se ejecutaron contra PostgreSQL: ver
+    docs/10-PRUEBAS-Y-ESTADO.md.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+         failOnWarning="true"
+         failOnRisky="true">
+    <testsuites>
+        <testsuite name="Unidad">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Caracteristicas">
+            <directory>tests/Feature</directory>
+        </testsuite>
+        <testsuite name="Aislamiento">
+            <directory>tests/Feature/Aislamiento</directory>
+        </testsuite>
+        <testsuite name="Alertas">
+            <directory>tests/Feature/Alertas</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="APP_KEY" value="base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="CACHE_STORE" value="array"/>
+        <env name="DB_CONNECTION" value="sqlite"/>
+        <env name="DB_DATABASE" value=":memory:"/>
+        <env name="MAIL_MAILER" value="array"/>
+        <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="SESSION_DRIVER" value="array"/>
+        <!-- La generacion de alertas no envia nada durante las pruebas. -->
+        <env name="FLOTA_ALERTAS_ENVIO_ACTIVO" value="false"/>
+    </php>
+</phpunit>
